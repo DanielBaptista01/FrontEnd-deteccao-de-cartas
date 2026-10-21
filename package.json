@@ -1,1 +1,22 @@
-{"name":"card-detection-dashboard","version":"1.0.0","private":true,"type":"module","scripts":{"dev":"vite --host 0.0.0.0","build":"vite build","preview":"vite preview --host 0.0.0.0","test":"node --test"},"devDependencies":{"vite":"^6.2.0"}}
+{
+  "name": "card-detection-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n api,web \"node server/index.js\" \"vite --host 0.0.0.0\"",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node --test",
+    "start": "node server/index.js"
+  },
+  "devDependencies": {
+    "vite": "^6.2.0",
+    "concurrently": "^9.2.1"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "dotenv": "^16.5.0"
+  }
+}

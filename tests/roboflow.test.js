@@ -25,3 +25,15 @@ test('não inventa carta caso dataset tenha apenas classe genérica', () => {
   const result=adaptRoboflowResponse({predictions:[{class:'Cards',confidence:0.99}]});
   assert.equal(result.card,null);assert.equal(result.confidence,0);
 });
+
+test('normaliza todas as 52 classes reais do dataset Roboflow', () => {
+  const ranks = ['10','2','3','4','5','6','7','8','9','A','J','K','Q'];
+  const suits = { copas: 'hearts', espadas: 'spades', ouros: 'diamonds', paus: 'clubs' };
+  for (const rank of ranks) {
+    for (const [suit, expected] of Object.entries(suits)) {
+      const label = rank === '5' && suit === 'espadas' ? '5_espada' :
+        rank === 'J' && suit === 'copas' ? 'j_copas' : `${rank}_${suit}`;
+      assert.equal(cardFromClass(label)?.id, `${rank}-${expected}`, `Classe desconhecida: ${label}`);
+    }
+  }
+});

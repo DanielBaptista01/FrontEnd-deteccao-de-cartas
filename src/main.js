@@ -1,5 +1,7 @@
 import './style.css';
 import { DECK, SUITS, RANKS, normalizeCard, probabilities } from './deck.js';
+import { startWorkflowWebRTC } from './workflow-webrtc.js';
+import { createRemovalTracker } from './workflow-events.js';
 
 const app = document.querySelector('#app');
 const STORAGE_KEY = 'cardvision-removed-v1';
@@ -8,11 +10,10 @@ try { const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); if (
 let stream = null;
 let sessionEnabled = false;
 let lastDetected = null;
-let detectionCandidate = null;
-let cooldownUntil = 0;
-let detectionTimer = null;
-let detectorUrl = localStorage.getItem('cardvision-detector-url') ?? '/api/detect';
-let processing = false;
+const tracker = createRemovalTracker();
+let webRtcSession = null;
+let detectorGeneration = 0;
+let sessionLimitTimer = null;
 let activeFilter = 'all';
 let cameraStarting = false;
 const persist = () => localStorage.setItem(STORAGE_KEY, JSON.stringify([...removed]));
@@ -24,13 +25,13 @@ app.innerHTML = `
 <main class="container">
 <div class="page-heading"><div><div class="eyebrow">MONITORAMENTO EM TEMPO REAL <span class="heading-line"></span></div><h1>Visão geral do <em>baralho.</em></h1><p>Acompanhe cada carta detectada e a chance da próxima jogada.</p></div><div class="overview"><div><span>CARTAS RESTANTES</span><strong id="remaining-counter">52 <small>/ 52</small></strong></div><div><span>JÁ IDENTIFICADAS</span><strong id="removed-counter">00</strong></div><div><span>ESTADO</span><strong class="overview-status" id="overview-state">Aguardando</strong></div></div></div>
 <div class="dashboard">
-<section class="panel camera-panel"><div class="panel-heading"><div><span class="panel-number">01 /</span><h2>Visão da câmera</h2></div><span class="state-pill" id="camera-badge"><span class="state-dot"></span> Desconectada</span></div><div class="video-shell"><video id="camera" autoplay playsinline muted aria-label="Transmissão da webcam"></video><canvas id="detections-overlay" aria-hidden="true"></canvas><div class="camera-placeholder" id="camera-placeholder"><span class="viewfinder">⌗</span><h3>Webcam não iniciada</h3><p>Ative a câmera para visualizar suas cartas.</p></div><div class="scan-corners" aria-hidden="true"><i></i><i></i><i></i><i></i></div><div class="live-mark" id="live-mark">● AO VIVO</div><div class="camera-card" id="camera-card"></div></div><div class="camera-controls"><button id="camera-button" class="btn primary">◉ &nbsp; Ativar webcam</button><button id="stop-button" class="btn secondary" disabled>Parar</button><span class="camera-help" id="camera-help">Permita o acesso à câmera do dispositivo.</span></div><div class="manual-row"><label for="manual-card">Registrar carta manualmente</label><div class="manual-actions"><select id="manual-card" aria-label="Selecionar carta"></select><button class="btn secondary" id="add-card">+ Registrar</button></div></div><p class="notice" id="notice" role="status" aria-live="polite"></p></section>
+<section class="panel camera-panel"><div class="panel-heading"><div><span class="panel-number">01 /</span><h2>Visão da câmera</h2></div><span class="state-pill" id="camera-badge"><span class="state-dot"></span> Desconectada</span></div><div class="video-shell"><video id="camera" autoplay playsinline muted aria-label="Transmissão da webcam"></video><canvas id="detections-overlay" aria-hidden="true"></canvas><div class="camera-placeholder" id="camera-placeholder"><span class="viewfinder">⌗</span><h3>Webcam não iniciada</h3><p>Ative a câmera para visualizar suas cartas.</p></div><div class="scan-corners" aria-hidden="true"><i></i><i></i><i></i><i></i></div><div class="live-mark" id="live-mark">● AO VIVO</div><div class="camera-card" id="camera-card"></div></div><div class="camera-controls"><button id="camera-button" class="btn primary">◉ &nbsp; Ativar webcam</button><button id="stop-button" class="btn secondary" disabled>Parar</button><span class="camera-help" id="camera-help">WebRTC Serverless GPU: confirme que o vídeo será transmitido à nuvem.</span></div><div class="manual-row"><label for="manual-card">Registrar carta manualmente</label><div class="manual-actions"><select id="manual-card" aria-label="Selecionar carta"></select><button class="btn secondary" id="add-card">+ Registrar</button></div></div><p class="notice" id="notice" role="status" aria-live="polite"></p></section>
 <section class="panel cards-panel"><div class="panel-heading"><div><span class="panel-number">02 /</span><h2>Probabilidade por carta</h2></div><span class="small-badge">PRÓXIMA CARTA</span></div><p class="panel-description">Chance de cada carta ser a próxima retirada do baralho.</p><div class="filter-tabs" id="filters"><button data-filter="all" class="selected">Todos</button><button data-filter="hearts">♥ Copas</button><button data-filter="diamonds">♦ Ouros</button><button data-filter="clubs">♣ Paus</button><button data-filter="spades">♠ Espadas</button></div><div class="cards-scroll"><div class="cards-grid" id="cards-grid"></div></div><div class="cards-legend"><span><i class="legend-dot green"></i> Disponível</span><span><i class="legend-dot gray"></i> Já retirada</span></div></section>
 <section class="panel suits-panel"><div class="panel-heading"><div><span class="panel-number">03 /</span><h2>Probabilidade por naipe</h2></div><span class="small-badge">4 NAIPES</span></div><p class="panel-description">Distribuição das cartas restantes por naipe.</p><div class="suit-list" id="suit-list"></div></section>
 <section class="panel colors-panel"><div class="panel-heading"><div><span class="panel-number">04 /</span><h2>Vermelho ou preto?</h2></div><span class="small-badge">2 CORES</span></div><p class="panel-description">Qual a probabilidade de a próxima carta ter cada cor?</p><div id="colors-content"></div><div class="activity-wrapper"><div class="activity-header"><strong>Atividade recente</strong><button id="undo" class="text-btn">↶ Desfazer última</button></div><div id="activity"><div class="event">Sem eventos nesta sessão.</div></div></div></section>
 </div><footer class="footer"><span>♠ CARDVISION <span class="footer-separator">/</span> BARALHO PADRÃO DE 52 CARTAS</span><button id="reset" class="reset-btn">↻ Reiniciar baralho</button></footer>
 </main>
-<dialog id="settings"><form method="dialog" class="settings-box"><div class="settings-heading"><h2>Integração de detecção</h2><button class="icon-btn" value="cancel" aria-label="Fechar">✕</button></div><p>O backend CardVision já está preparado para chamar o modelo treinado do Roboflow. Configure o ID da versão e a chave em um arquivo .env local, sem expor a chave no navegador. Também é possível configurar outro endpoint.</p><label for="api-url">Endpoint de detecção</label><input id="api-url" type="text" placeholder="/api/detect" autocomplete="off"/><p class="settings-tip">Requisição <code>POST</code> com <code>multipart/form-data</code> no campo <code>image</code>. Resposta: <code>{"card":"AS","confidence":0.99}</code> ou <code>{"rank":"A","suit":"spades","confidence":0.99}</code>. O endpoint padrão é <code>/api/detect</code> (Roboflow via servidor local). A carta é registrada depois de 2 detecções consecutivas com confiança ≥ 0,80. Se usar outra origem, configure CORS no backend.</p><div class="dialog-buttons"><button class="btn secondary" id="clear-api" type="button">Remover integração</button><button class="btn primary" id="save-api" value="default">Salvar</button></div></form></dialog>`;
+<dialog id="settings"><form method="dialog" class="settings-box"><div class="settings-heading"><h2>Roboflow WebRTC</h2><button class="icon-btn" value="cancel" aria-label="Fechar">✕</button></div><p>Workflow publicado: <strong>Cards vcards-ksgh0-2-rfdetr-small-t1 Logic</strong>. Workspace: cardsdetection-pwqty.</p><p>A webcam é transmitida à GPU do Roboflow somente quando você ativa a câmera. A sessão é limitada a 3 minutos, pode consumir créditos, e você pode interrompê-la a qualquer momento.</p><p>Configure exclusivamente <code>ROBOFLOW_API_KEY</code> no arquivo .env do backend. Nunca coloque essa chave no frontend.</p><div class="dialog-buttons"><button class="btn primary" value="default">Fechar</button></div></form></dialog></dialog>`;
 
 const video = document.querySelector('#camera');
 const overlay = document.querySelector('#detections-overlay');
@@ -60,62 +61,78 @@ function addCard(value, source = 'manual') {
  removed.add(card.id); lastDetected=card.id; persist();render();log(`${card.label} detectada e retirada do baralho (${source === 'camera' ? 'API' : 'manual'})`,'success'); notify(`${card.label} registrada. Restam ${52-removed.size} cartas.`);return true;
 }
 const cameraButton=document.querySelector('#camera-button'),stopButton=document.querySelector('#stop-button');
-async function startCamera() {
- if(cameraStarting || stream) return; cameraStarting=true; cameraButton.disabled=true;
- try {
- if (!navigator.mediaDevices?.getUserMedia) throw new Error('Webcam indisponível neste contexto. Use HTTPS ou localhost.');
- stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});
- video.srcObject=stream; await video.play();
- video.classList.add('visible');document.querySelector('#camera-placeholder').hidden=true;document.querySelector('#live-mark').classList.add('visible');
- document.querySelector('#camera-badge').innerHTML='<span class="state-dot"></span> Conectada';document.querySelector('#camera-badge').classList.add('connected');
- sessionEnabled=true;cameraButton.textContent='◉ Webcam ativa';stopButton.disabled=false;
- document.querySelector('#camera-help').textContent=detectorUrl?'Detector conectado por API':'Sem API: registre cartas manualmente';
- render();notify('Webcam ativa. ' + (detectorUrl?'Detecção por API habilitada.':'Configure a API de detecção ou use o registro manual.'));log('Webcam iniciada');
- if(detectorUrl) startDetector();
- } catch(err) {notify(`Não foi possível iniciar a webcam: ${err.message}`,true);stopCamera();}
- finally {cameraStarting=false;cameraButton.disabled=!!stream}
+async function startCamera(){
+ if(cameraStarting||stream)return;
+ cameraStarting=true;cameraButton.disabled=true;
+ try{
+  if(!navigator.mediaDevices?.getUserMedia)throw new Error('É necessário HTTPS ou localhost para acessar a webcam.');
+  const status=await fetch('/api/health',{signal:AbortSignal.timeout(6000)});
+  if(!status.ok || !(await status.json()).configured)throw new Error('Configure ROBOFLOW_API_KEY no servidor CardVision.');
+  stream=await navigator.mediaDevices.getUserMedia({
+   video:{facingMode:{ideal:'environment'},width:{ideal:640},height:{ideal:480}},audio:false
+  });
+  video.srcObject=stream;
+  await video.play();
+  video.classList.add('visible');document.querySelector('#camera-placeholder').hidden=true;document.querySelector('#live-mark').classList.add('visible');
+  document.querySelector('#camera-badge').innerHTML='<span class="state-dot"></span> Conectada';
+  document.querySelector('#camera-badge').classList.add('connected');
+  sessionEnabled=true;cameraButton.textContent='◉ Webcam ativa';stopButton.disabled=false;
+  document.querySelector('#camera-help').textContent='Conectando WebRTC Serverless GPU...';
+  render();notify('Iniciando Workflow WebRTC. O primeiro acesso pode levar mais tempo.');log('Webcam e conexão remota iniciadas');
+  startDetector();
+ }catch(error){stopCamera();notify(`Não foi possível iniciar: ${error.message}`,true);}
+ finally{cameraStarting=false;cameraButton.disabled=!!stream;}
 }
-function stopCamera() {
+function stopDetector(){
+ detectorGeneration++;
+ tracker.reset();
+ if(sessionLimitTimer){clearTimeout(sessionLimitTimer);sessionLimitTimer=null;}
+ const old=webRtcSession;webRtcSession=null;
+ if(old)old.stop().catch(()=>notify('Webcam fechada; não foi possível confirmar o encerramento da GPU.',true));
+}
+function stopCamera(){
+ stopDetector();
  overlay.getContext('2d').clearRect(0,0,overlay.width,overlay.height);
- stopDetector(); if(stream) stream.getTracks().forEach(track=>track.stop());stream=null;video.srcObject=null;video.classList.remove('visible');
+ if(stream)stream.getTracks().forEach(track=>track.stop());
+ stream=null;video.srcObject=null;video.classList.remove('visible');
  document.querySelector('#camera-placeholder').hidden=false;document.querySelector('#live-mark').classList.remove('visible');
- document.querySelector('#camera-badge').innerHTML='<span class="state-dot"></span> Desconectada'; document.querySelector('#camera-badge').classList.remove('connected');
- cameraButton.textContent='◉  Ativar webcam';cameraButton.disabled=false;stopButton.disabled=true;sessionEnabled=false;render();
+ document.querySelector('#camera-badge').innerHTML='<span class="state-dot"></span> Desconectada';
+ document.querySelector('#camera-badge').classList.remove('connected');
+ cameraButton.textContent='◉ Ativar webcam';cameraButton.disabled=false;stopButton.disabled=true;
+ sessionEnabled=false;render();
 }
-function stopDetector(){if(detectionTimer) clearInterval(detectionTimer);detectionTimer=null;detectionCandidate=null;processing=false;}
 async function startDetector(){
- stopDetector(); if(!stream||!detectorUrl)return;
- if(detectorUrl === '/api/detect') {
-  try {
-   const res = await fetch('/api/health');
-   if(!res.ok || !(await res.json()).configured) {
-    document.querySelector('#camera-help').textContent='Roboflow pendente: configure o arquivo .env';
-    notify('Webcam disponível; detecção automática aguardando a configuração do modelo no servidor.');
-    return;
+ if(!stream)return;
+ const generation=detectorGeneration;
+ try{
+  const connection=await startWorkflowWebRTC(stream,{
+   onData:result=>{
+    if(generation!==detectorGeneration)return;
+    drawDetections(result);
+    const removedId=tracker.consume(result,removed);
+    if(removedId) addCard(removedId,'camera');
+    else if(tracker.armedCard){
+      const card=DECK.find(c=>c.id===tracker.armedCard);
+      document.querySelector('#camera-help').textContent=`${card?.label??''} reconhecida: retire-a da câmera para registrar.`;
+    }
+   },
+   onState:state=>{
+    if(generation===detectorGeneration){document.querySelector('#camera-help').textContent=state;notify(state,true);}
    }
-  } catch {
-   document.querySelector('#camera-help').textContent='Servidor da API indisponível';
-   notify('Webcam disponível; inicialize o servidor CardVision para a detecção automática.');
-   return;
+  });
+  if(generation!==detectorGeneration){await connection.stop().catch(()=>{});return;}
+  webRtcSession=connection;
+  document.querySelector('#camera-help').textContent='WebRTC conectado • mostre uma carta e retire-a da câmera.';
+  notify('Detecção WebRTC ativa. Registro após reconhecimento confirmado e retirada da imagem.');
+  sessionLimitTimer=setTimeout(()=>{if(generation===detectorGeneration){stopCamera();notify('Sessão WebRTC encerrada após 3 minutos. Ative novamente para continuar.');}},175000);
+ }catch(error){
+  if(generation===detectorGeneration){
+   document.querySelector('#camera-help').textContent='WebRTC indisponível';
+   notify(`Falha ao iniciar Workflow: ${error.message}`,true);
+   log('Não foi possível estabelecer a conexão WebRTC');
   }
  }
- detectionTimer=setInterval(async()=>{
- if(processing||!video.videoWidth||Date.now()<cooldownUntil)return;processing=true;
- try {const canvas=document.createElement('canvas');canvas.width=640;canvas.height=Math.round(640*video.videoHeight/video.videoWidth);canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
- const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',0.8)); if(!blob)return;
- const body=new FormData();body.append('image',blob,'frame.jpg');
- const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),3500);
- let response;try{response=await fetch(detectorUrl,{method:'POST',body,signal:controller.signal});}finally{clearTimeout(timeout)}
- if(!response.ok) { const detail=await response.json().catch(()=>({})); throw new Error(detail.error || `HTTP ${response.status}`); }
- const result=await response.json();drawDetections(result);
- if(result.unknownClasses?.length && !result.card) document.querySelector('#camera-help').textContent='Classe não identificada: '+result.unknownClasses[0];
- const card=normalizeCard(result.card ?? (result.rank && result.suit?{rank:result.rank,suit:result.suit}:null));
- const confidence=Number(result.confidence??0);
- if(!card||confidence<0.80||removed.has(card.id)){detectionCandidate=null;return}
- if(detectionCandidate?.id===card.id) detectionCandidate.count++; else detectionCandidate={id:card.id,count:1};
- if(detectionCandidate.count>=2){if(addCard(card.id,'camera'))cooldownUntil=Date.now()+3000;detectionCandidate=null}
- }catch(err){document.querySelector('#camera-help').textContent=`API: ${err.message}`;}finally{processing=false}
-},1300)}
+}
 function drawDetections(result) {
  const dimensions = result?.image;
  const boxes = Array.isArray(result?.predictions) ? result.predictions : [];
@@ -145,8 +162,7 @@ document.querySelector('#add-card').addEventListener('click',()=>{if(addCard(man
 document.querySelector('#filters').addEventListener('click',event=>{const filter=event.target.closest('button')?.dataset.filter;if(!filter)return;activeFilter=filter;document.querySelectorAll('#filters button').forEach(b=>b.classList.toggle('selected',b.dataset.filter===filter));render()});
 document.querySelector('#undo').addEventListener('click',()=>{const cards=[...removed];const last=cards.pop();if(!last)return;removed.delete(last);lastDetected=cards.at(-1)||null;persist();render();notify(`${DECK.find(c=>c.id===last).label} devolvida ao baralho.`);log('Último registro desfeito')});
 document.querySelector('#reset').addEventListener('click',()=>{if(!removed.size)return;if(!confirm('Reiniciar o baralho e devolver todas as cartas?'))return;removed.clear();lastDetected=null;persist();render();notify('Baralho reiniciado com 52 cartas.');log('Baralho reiniciado')});
-const settings=document.querySelector('#settings');document.querySelector('#settings-open').addEventListener('click',()=>{document.querySelector('#api-url').value=detectorUrl;settings.showModal()});
-document.querySelector('#save-api').addEventListener('click',e=>{const input=document.querySelector('#api-url');if(input.value && input.value.trim() !== '/api/detect' && !/^https?:\/\/[^\s]+$/i.test(input.value.trim())){e.preventDefault();notify('Use /api/detect ou uma URL http(s) válida.',true);return}detectorUrl=input.value.trim();localStorage.setItem('cardvision-detector-url',detectorUrl);document.querySelector('#camera-help').textContent=detectorUrl?'API configurada':'Registro manual disponível';if(stream){if(detectorUrl)startDetector();else stopDetector()}notify(detectorUrl?'Endpoint salvo.':'Integração removida.');});
-document.querySelector('#clear-api').addEventListener('click',()=>{document.querySelector('#api-url').value='';detectorUrl='';localStorage.removeItem('cardvision-detector-url');stopDetector();settings.close();notify('Integração removida; registro manual disponível.')});
+const settings=document.querySelector('#settings');
+document.querySelector('#settings-open').addEventListener('click',()=>settings.showModal());
 window.addEventListener('beforeunload',()=>{stopCamera()});
 render();

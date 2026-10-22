@@ -17,6 +17,7 @@
   "dependencies": {
     "express": "^5.1.0",
     "multer": "^2.0.2",
-    "dotenv": "^16.5.0"
+    "dotenv": "^16.5.0",
+    "@roboflow/inference-sdk": "^0.4.0"
   }
 }

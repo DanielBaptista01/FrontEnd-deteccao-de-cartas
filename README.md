@@ -1,89 +1,75 @@
-# CardVision — Detecção de cartas + Roboflow
+# CardVision — Webcam + Roboflow Workflow (WebRTC)
 
-Frontend responsivo com webcam, probabilidades de **52 cartas sem reposição** e backend Node.js preparado para chamar um **modelo treinado no Roboflow**. Não é necessário baixar o dataset para utilizar o modelo hospedado.
+Painel responsivo com quatro quadrantes: webcam, probabilidades das 52 cartas, probabilidades por naipe, e probabilidades de vermelho/preto, **sem reposição**.
 
-## Integração do seu projeto Roboflow
+## Workflow Roboflow (conferido via OAuth/MCP)
 
-1. No Roboflow, confirme em **Classes & Tags** que existem classes que distinguem *valor e naipe* (`3_of_clubs`, `AS`, `queen_of_hearts` etc.). Se existir apenas `Cards`, o modelo poderá localizar cartas, mas **não conseguirá identificar qual carta**.
-2. Em **Versions**, crie uma versão com o dataset anotado (treino/validação/teste). Use **Train Model** se ainda não existir um modelo treinado. Escolha o modelo e depois abra **Deploy** para obter o identificador exato da versão (por exemplo, `nome-do-projeto/1`).
-3. Copie `.env.example` para `.env` na raiz. No `.env`, preencha `ROBOFLOW_MODEL_ID` e `ROBOFLOW_API_KEY` com seus próprios dados. **Não publique a chave, não a envie pelo chat e não coloque no frontend.** O `.env` já está no `.gitignore`.
-4. Execute:
+- Nome: **Cards vcards-ksgh0-2-rfdetr-small-t1 Logic**
+- Workspace (slug): `cardsdetection-pwqty`
+- Workflow ID (slug): `cards-vcards-ksgh0-2-rfdetr-small-t1-logic`
+- Entrada declarada: `image` (`InferenceImage`)
+- Parâmetros declarados: **nenhum**
+- Saída declarada: `predictions` (JsonField); não possui saída de imagem anotada
+- O modelo interno do Workflow é `cardsdetection-pwqty/cards-ksgh0-2-rfdetr-small-t1`.
+
+**Resposta real observada em `workflows_run`:** lista com um item por imagem; o campo `predictions` contém `{image:{width,height},predictions:[{class,confidence,x,y,width,height,...}]}`. O exemplo real de uma imagem de teste reconheceu `5_ouros` com confiança ~0,481, e não tem saídas de imagem base64.
+
+## Executar
+
+1. É necessário Node.js 20.19+ ou 22.12+, Chrome/Edge/Firefox com suporte WebRTC, e acesso à câmera em `localhost` ou HTTPS.
+2. Copie `.env.example` para `.env` e preencha apenas `ROBOFLOW_API_KEY` com a chave privada de seu workspace. **Não coloque a chave no frontend, GitHub, URLs, screenshots ou logs.** O arquivo `.env` está ignorado pelo Git.
+3. Rode:
 
 ```bash
 npm install
 npm run dev
 ```
 
-5. Abra o endereço do Vite exibido no terminal (normalmente `http://localhost:5173`). Ative a webcam. O endpoint padrão do frontend `/api/detect` já utiliza o proxy local e encaminha as imagens ao Roboflow por meio do servidor Node na porta 3001.
+4. Abra `http://localhost:5173`. Clique em **Ativar webcam** para **iniciar uma sessão WebRTC com a nuvem Roboflow**. Apenas o áudio está desativado; o vídeo é transmitido ao Roboflow enquanto a sessão está ativa. Clique em **Parar** para encerrar.
+5. A sessão solicita a GPU `webrtc-gpu-small`, região `us` e `processing_timeout=180` segundos. O frontend também encerra automaticamente a webcam em aproximadamente 175 segundos. A primeira conexão pode demorar devido à inicialização/carga do modelo. O serviço pode consumir **créditos por tempo de GPU**. Consulte sua assinatura no Roboflow antes de usar continuamente.
 
-> Requer Node.js 20.19+ ou 22.12+. A webcam precisa de permissão e de contexto `localhost` ou HTTPS.
+A conexão WebRTC usa `@roboflow/inference-sdk` no navegador com o proxy local `POST /api/init-webrtc`. O backend fixa o workspace, o Workflow, a entrada e a saída; o frontend nunca recebe a chave privada.
 
-## Como funciona
+A versão publicada do Workflow retorna **dados**, não um vídeo anotado. Por isso, mostramos a câmera local com caixas desenhadas no `canvas`, usando as detecções recebidas pelo canal de dados WebRTC.
 
-- Superior esquerdo: webcam e caixas sobre as cartas detectadas, indicação da última carta reconhecida, registro manual e configurações.
-- Superior direito: 52 cartas, filtros por naipe e probabilidade de cada carta ainda disponível.
-- Inferior esquerdo: proporção de cada um dos quatro naipes restantes.
-- Inferior direito: proporções das cores vermelha e preta restantes.
-- Cartas já removidas recebem 0% e não são removidas novamente. Há confirmação da mesma carta em **dois frames consecutivos** com confiança mínima de **80%**, além de intervalo mínimo de três segundos entre registros.
-- Botões para desfazer e reiniciar e persistência local de cartas removidas.
+## Como o baralho é atualizado
 
-**Confiança do modelo** indica a certeza da identificação visual. **Probabilidade da próxima carta** é calculada apenas pelo baralho restante, supondo sorteio uniforme, e não representa a confiança da IA.
+- O detector identifica uma carta em pelo menos **dois frames consecutivos com confiança ≥80%**.
+- A contagem só é alterada **depois que a carta desaparece da imagem por dois frames**. Ex.: mostre 5♦ e retire-o da câmera.
+- O limiar ótimo F1 de 30% no teste Roboflow é distinto do critério conservador de registro automático de 80%. Caso haja muitas cartas não registradas, avalie o modelo com webcam antes de diminuir o limiar. Detecções erradas devem ser corrigidas com **Desfazer última**.
+- Uma carta retirada não pode ser registrada de novo; após reiniciar ou desfazer, as probabilidades são recalculadas. O histórico do baralho permanece no armazenamento local.
+- Caso o reconhecimento automático esteja indisponível, as cartas podem ser registradas manualmente pelo seletor.
 
-## Convenções de nomes de classes
+Com `N` cartas restantes, a probabilidade de uma carta específica ainda presente é `100/N`; a de um naipe/cor é `100 × contagem_do_grupo / N`. As cartas removidas têm 0%. Com N=0 não há próximo sorteio.
 
-São aceitas, entre outras: `3_of_clubs`, `3 of clubs`, `3C`, `Ace of Spades`, `AS`, `Queen of Hearts`, `Q-hearts`. No formulário manual: `♣` paus, `♥` copas, `♦` ouros, `♠` espadas.
+## API local
 
-Se o seu projeto usa outros nomes, crie um arquivo de mapeamento JSON inspirado em `server/class-map.example.json` e indique `ROBOFLOW_CLASS_MAP=./server/seu-mapa.json` no `.env`. Exemplo:
+- `GET /api/health`: status da configuração (sem revelar credenciais).
+- `POST /api/init-webrtc`: inicia WebRTC na infraestrutura serverless, aceitando apenas uma oferta SDP do navegador e aplicando a configuração fixa do Workflow.
+- `POST /api/stop-webrtc`: solicita encerramento da sessão remota registrada pelo servidor. Se o encerramento não puder ser confirmado, o limite de processamento remoto de 180 segundos permanece como proteção.
+- `POST /api/detect`: opção de teste com **uma imagem JPEG/PNG/WebP** enviada no campo `image`. O backend chama o **mesmo Workflow** via `POST https://serverless.roboflow.com/cardsdetection-pwqty/workflows/cards-vcards-ksgh0-2-rfdetr-small-t1-logic`, passa `inputs.image` em base64 e interpreta a lista de saídas. Esta rota não é o caminho de streaming.
 
-```json
-{
-  "3_de_paus": "3-clubs",
-  "Rainha de Copas": "Q-hearts"
-}
-```
+As chamadas de inicialização, término e imagem autenticam com `Authorization: Bearer` no servidor. Nunca enviam a chave na URL, no corpo da requisição ou no código do navegador. Retentativas exponenciais são usadas apenas para erros temporários e com limites de tempo.
 
-A imagem anotada deve permitir identificar a carta; uma classe única `Cards` não fornece essa informação. Para nomes personalizados, as entradas no mapa são obrigatórias.
-
-## API
-
-### Saúde e configuração
-
-```http
-GET /api/health
-```
-
-Retorna `{"configured":true,"provider":"roboflow"}` quando existe configuração válida no servidor. A chave nunca é devolvida.
-
-### Detecção
-
-```http
-POST /api/detect
-Content-Type: multipart/form-data
-image=<frame JPEG>
-```
-
-O backend envia o conteúdo como base64 para a API hospedada do Roboflow e devolve uma resposta padronizada:
-
-```json
-{
-  "card": "3-clubs",
-  "confidence": 0.96,
-  "image": {"width":640,"height":360},
-  "predictions": [
-    {"card":"3-clubs","label":"3_of_clubs","confidence":0.96,"x":270,"y":180,"width":120,"height":190}
-  ],
-  "unknownClasses": []
-}
-```
-
-A API usa requisições à infraestrutura hospedada do Roboflow e pode consumir créditos. O frontend solicita aproximadamente um frame a cada 1,3 segundo enquanto a câmera está ativa; desative a câmera para interromper. Se não existir modelo treinado ou as classes forem genéricas, a detecção automática ainda não funcionará; o registro manual continua disponível.
-
-## Comandos
+## Testes
 
 ```bash
-npm test       # testes de lógica e normalização de resposta
-npm run build  # frontend de produção
-npm start      # servidor que entrega dist/ + API na porta 3001
+npm test
 ```
 
-As probabilidades são `100 * quantidade_da_categoria / total_restante`; para uma carta ainda presente, `100 / total_restante`. Com zero cartas não existe próximo sorteio, exibindo 0%.
+O arquivo `tests/workflow-client.test.js` contém um teste de contrato para a **resposta real amostrada do Workflow**, um teste de imagem com HTTP simulado (que verifica cabeçalho Bearer e nomes de saída), testes de SDP, erros e retentativas. Inclui também um teste ao vivo **opcional**, que só roda quando `ROBOFLOW_API_KEY` estiver presente no ambiente:
+
+```bash
+node --test tests/workflow-client.test.js
+```
+
+O teste ao vivo usa uma imagem de teste existente no workspace e pode consumir créditos. Nunca grave a imagem nem a chave no repositório.
+
+Os testes de `src/workflow-events.js` verificam a leitura de `serialized_output_data`, prevenção de duplicatas, rejeição de baixa confiança e confirmação da retirada.
+
+## Limitações
+
+- A execução via Roboflow MCP de **uma imagem real** foi concluída com resposta válida. A sessão WebRTC do navegador e a conexão com a chave privada precisam ser verificadas no computador que hospeda o projeto.
+- O backend é um serviço local, limitado a `127.0.0.1`. Para implantar publicamente, adicione autenticação, controles de sessões, HTTPS e proteção contra uso indevido de recursos antes de expor o proxy.
+- TURN pode ser necessário em redes restritas; nesta integração é usado o STUN padrão do SDK, sem expor credenciais privadas.
+- O streaming envia frames para um serviço externo e pode implicar cobrança por tempo de uso.

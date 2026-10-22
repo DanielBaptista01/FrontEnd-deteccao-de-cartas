@@ -41,7 +41,10 @@ export async function postWorkflow(url, key, payload, { fetchImpl = fetch, timeo
         const message = await unwrapMessage(response);
         throw new WorkflowRequestError(`Roboflow HTTP ${response.status}: ${message}`, response.status, transient(response.status));
       }
-      return await response.json();
+      if(response.status===204)return {};
+      const body=await response.text();
+      if(!body.trim())return {};
+      try{return JSON.parse(body);}catch{throw new WorkflowRequestError('JSON inválido retornado pelo Roboflow.');}
     } catch (error) {
       const failure = error instanceof WorkflowRequestError
         ? error : new WorkflowRequestError(error?.name === 'AbortError' ? 'Tempo esgotado na API do Roboflow.' : 'Falha de comunicação com Roboflow.', 0, true);

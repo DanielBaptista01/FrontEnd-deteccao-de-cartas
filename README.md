@@ -5,7 +5,7 @@ Frontend responsivo com webcam, probabilidades de **52 cartas sem reposição** 
 ## Integração do seu projeto Roboflow
 
 1. No Roboflow, confirme em **Classes & Tags** que existem classes que distinguem *valor e naipe* (`3_of_clubs`, `AS`, `queen_of_hearts` etc.). Se existir apenas `Cards`, o modelo poderá localizar cartas, mas **não conseguirá identificar qual carta**.
-2. Em **Versions**, crie uma versão com o dataset anotado (treino/validação/teste). Use **Train Model** se ainda não existir um modelo treinado. Escolha o modelo e depois abra **Deploy** para obter o identificador exato da versão (por exemplo, `nome-do-projeto/1`).
+2. Em **Versions**, crie uma versão com o dataset anotado (treino/validação/teste). Use **Train Model** se ainda não existir um modelo treinado. Escolha **Models** e clique em **Copy Model ID**. Em treinamentos atuais, use o ID completo como `workspace/cards-ksgh0-2-rfdetr-small-t1` (exemplo; confirme seu workspace). O formato antigo `projeto/versão` é um alias para compatibilidade e pode apontar para outro treinamento.
 3. Copie `.env.example` para `.env` na raiz. No `.env`, preencha `ROBOFLOW_MODEL_ID` e `ROBOFLOW_API_KEY` com seus próprios dados. **Não publique a chave, não a envie pelo chat e não coloque no frontend.** O `.env` já está no `.gitignore`.
 4. Execute:
 
@@ -76,7 +76,7 @@ O backend envia o conteúdo como base64 para a API hospedada do Roboflow e devol
 }
 ```
 
-A API usa requisições à infraestrutura hospedada do Roboflow e pode consumir créditos. O frontend solicita aproximadamente um frame a cada 1,3 segundo enquanto a câmera está ativa; desative a câmera para interromper. Se não existir modelo treinado ou as classes forem genéricas, a detecção automática ainda não funcionará; o registro manual continua disponível.
+O backend usa o limiar de confiança **0,30** (30%) na API Roboflow, indicado como ótimo na avaliação inicial. O frontend continua exigindo **≥80% em dois frames consecutivos** para registrar automaticamente uma carta, reduzindo a chance de retiradas incorretas; isso pode deixar de registrar detecções válidas e deve ser ajustado após testes reais. A API usa requisições à infraestrutura hospedada do Roboflow e pode consumir créditos. O frontend solicita aproximadamente um frame a cada 1,3 segundo enquanto a câmera está ativa; desative a câmera para interromper. Se não existir modelo treinado ou as classes forem genéricas, a detecção automática ainda não funcionará; o registro manual continua disponível.
 
 ## Comandos
 

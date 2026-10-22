@@ -6,7 +6,7 @@ export const SUITS = [
 ];
 export const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
 export const DECK = SUITS.flatMap(suit => RANKS.map(rank => ({ id: `${rank}-${suit.id}`, rank, suit: suit.id, symbol: suit.symbol, color: suit.color, label: `${rank}${suit.symbol}` })));
-const suitAliases = { clubs:'clubs', club:'clubs', paus:'clubs', '♣':'clubs', c:'clubs', hearts:'hearts', heart:'hearts', copas:'hearts', '♥':'hearts', h:'hearts', diamonds:'diamonds', diamond:'diamonds', ouros:'diamonds', '♦':'diamonds', d:'diamonds', spades:'spades', spade:'spades', espadas:'spades', '♠':'spades', s:'spades' };
+const suitAliases = { clubs:'clubs', club:'clubs', paus:'clubs', pau:'clubs', '♣':'clubs', c:'clubs', hearts:'hearts', heart:'hearts', copas:'hearts', copa:'hearts', '♥':'hearts', h:'hearts', diamonds:'diamonds', diamond:'diamonds', ouros:'diamonds', ouro:'diamonds', '♦':'diamonds', d:'diamonds', spades:'spades', spade:'spades', espadas:'spades', espada:'spades', '♠':'spades', s:'spades' };
 const rankAliases = { ace:'A', as:'A', ás:'A', jack:'J', valete:'J', queen:'Q', dama:'Q', king:'K', rei:'K' };
 export function normalizeCard(input) {
   if (input && typeof input === 'object') {
@@ -17,7 +17,7 @@ export function normalizeCard(input) {
   if (typeof input !== 'string') return null;
   let text = input.trim().toLowerCase();
   let rank, suit;
-  const dashed = text.match(/^(.+?)[-_ ](clubs|club|paus|hearts|heart|copas|diamonds|diamond|ouros|spades|spade|espadas|c|h|d|s|♣|♥|♦|♠)$/i);
+  const dashed = text.match(/^(.+?)[-_ ](clubs|club|paus|pau|hearts|heart|copas|copa|diamonds|diamond|ouros|ouro|spades|spade|espadas|espada|c|h|d|s|♣|♥|♦|♠)$/i);
   if (dashed) {rank = dashed[1]; suit = dashed[2];}
   else {
     const compact = text.match(/^(10|[a2-9jqk])([chds♣♥♦♠])$/i);

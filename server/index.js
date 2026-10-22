@@ -4,12 +4,13 @@ import multer from 'multer';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { adaptRoboflowResponse } from './roboflow.js';
+import { isValidModelId } from './model-id.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
 const model = (process.env.ROBOFLOW_MODEL_ID || '').trim();
 const key = (process.env.ROBOFLOW_API_KEY || '').trim();
-const ready = !!key && /^[a-z0-9][a-z0-9_-]*\/[1-9][0-9]*$/i.test(model);
+const ready = !!key && isValidModelId(model);
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 3 * 1024 * 1024, files: 1 } });
 let classMap = {};
 if (process.env.ROBOFLOW_CLASS_MAP) {
@@ -23,11 +24,10 @@ app.post('/api/detect', upload.single('image'), async (req, res) => {
   if (!ready) return res.status(503).json({ error: 'Roboflow não configurado no servidor. Informe ROBOFLOW_MODEL_ID e ROBOFLOW_API_KEY no .env.' });
   if (!req.file || !['image/jpeg', 'image/png', 'image/webp'].includes(req.file.mimetype)) return res.status(400).json({ error: 'Envie uma imagem JPEG, PNG ou WebP no campo image.' });
   const apiUrl = new URL(`https://serverless.roboflow.com/${model}`);
-  apiUrl.searchParams.set('api_key', key);
-  apiUrl.searchParams.set('confidence', '40'); // threshold 40%, further confirmation in frontend
+  apiUrl.searchParams.set('confidence', '0.30'); // Roboflow test-set optimal threshold; frontend still requires repeated >=80% confidence to register
   try {
     const response = await fetch(apiUrl, {
-      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': `Bearer ${key}` },
       body: req.file.buffer.toString('base64'), signal: AbortSignal.timeout(12000)
     });
     if (!response.ok) return res.status(502).json({ error: `Roboflow retornou HTTP ${response.status}. Verifique o modelo, a versão e a chave.` });
